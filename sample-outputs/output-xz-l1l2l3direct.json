@@ -1,0 +1,20 @@
+{
+  "caches": [
+    {
+      "hits": 19991106,
+      "misses": 695119,
+      "name": "L1"
+    },
+    {
+      "hits": 115493,
+      "misses": 579626,
+      "name": "L2"
+    },
+    {
+      "hits": 29272,
+      "misses": 550354,
+      "name": "L3"
+    }
+  ],
+  "main_memory_accesses": 550354
+}

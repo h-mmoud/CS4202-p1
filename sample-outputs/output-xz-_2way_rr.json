@@ -1,0 +1,10 @@
+{
+  "caches": [
+    {
+      "hits": 20060873,
+      "misses": 609003,
+      "name": "2way"
+    }
+  ],
+  "main_memory_accesses": 609003
+}

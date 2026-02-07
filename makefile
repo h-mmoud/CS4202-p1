@@ -2,16 +2,16 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -Wall -g -I/Users/hassano/CS4202/vcpkg_installed/arm64-osx/include
+CXXFLAGS = -std=c++23 -O3 -I./include
 
 # Target executable
-TARGET = helloworld
+TARGET = cache-sim
 
 # For deleting the target
-TARGET_DEL = helloworld.exe
+TARGET_DEL = cache-sim.exe
 
 # Source files
-SRCS = helloworld.cpp 
+SRCS = cache-sim.cpp 
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)

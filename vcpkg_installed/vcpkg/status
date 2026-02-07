@@ -1,0 +1,23 @@
+Package: vcpkg-cmake-config
+Version: 2024-05-23
+Architecture: arm64-osx
+Multi-Arch: same
+Abi: 23c28108580ea28322aa3057ca8236991bd43a2e82da121f1c3cb98c3af76ada
+Status: install ok installed
+
+Package: vcpkg-cmake
+Version: 2024-04-23
+Architecture: arm64-osx
+Multi-Arch: same
+Abi: aeec741ec4f70289b2ffe694f5e3b8f75ad80990ec1b1d90191da9ebde8f6e64
+Status: install ok installed
+
+Package: rapidjson
+Version: 2025-02-26
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: arm64-osx
+Multi-Arch: same
+Abi: 633b3fe10caf02e4ed1c533abd74d4f2df0de5ea57a402769bcf3864185b100b
+Description: A fast JSON parser/generator for C++ with both SAX/DOM style API <http://rapidjson.org/>
+Status: install ok installed
+

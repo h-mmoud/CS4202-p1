@@ -2,8 +2,8 @@
     "caches": [
         {
             "name": "direct",
-            "size": 1024,
-            "line_size": 64,
+            "size": 4096,
+            "line_size": 32,
             "kind": "direct"
         }
     ]

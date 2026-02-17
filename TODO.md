@@ -1,0 +1,1 @@
+check all possible tags in parallel

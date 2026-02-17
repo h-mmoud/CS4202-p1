@@ -4,7 +4,7 @@
             "name": "direct",
             "size": 4096,
             "line_size": 32,
-            "kind": "direct"
+            "kind": "2way"
         }
     ]
 }

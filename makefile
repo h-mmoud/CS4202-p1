@@ -2,7 +2,7 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -std=c++23 -O3 -I./include
+CXXFLAGS = -std=c++20 -O3 -I./include
 
 # Target executable
 TARGET = cache-sim
@@ -11,7 +11,7 @@ TARGET = cache-sim
 TARGET_DEL = cache-sim.exe
 
 # Source files
-SRCS = cache-sim.cpp 
+SRCS = cache-sim.cpp cache-sim.hpp 
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)

@@ -1,30 +1,9 @@
 #include <iostream>
-#include <vector>
-#include <string>
-#include <optional>
 #include <fstream>
 #include <sstream>
+#include "cache-sim.hpp"
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
-
-struct Cache {
-  std::string name; 
-  size_t size;
-  size_t line_size;
-  std::string kind;
-  std::optional<std::string> replacement_policy;
-  unsigned int num_sets;
-  unsigned int lines_per_set;
-
-  /* how many bits we need */
-  unsigned int tag_size;
-  unsigned int index_size;
-  unsigned int offset_size;
-};
-
-struct CacheConfig {
-  std::vector<Cache> caches;
-};
 
 void calc_num_sets(Cache *c);
 void calc_lines_per_set(Cache *c);
@@ -96,6 +75,7 @@ int parse_config_json(CacheConfig *config, std::string filename) {
             calc_num_sets(&cache);
             calc_lines_per_set(&cache);
             calc_bit_counts(&cache);
+            cache.storage.resize(cache.num_sets * cache.lines_per_set);
             config->caches.push_back(cache);
 
         }
@@ -125,26 +105,70 @@ std::tuple<uint64_t, char, int> parse_tracefile_line(std::string tracefile_line)
 }
 
 // std::tuple<uint
-
+// todo: vectors to simulate cache
+// spans for sets
+//
 
 int main(int argc, char* argv[]) {
     CacheConfig config;
     std::string filename = argv[1];
+    std::string tracefilename = argv[2];
     parse_config_json(&config, filename);
 
     std::ifstream ifs;
-    ifs.open("gcc.out", std::ifstream::in);
+    ifs.open(tracefilename, std::ifstream::in);
 
     std::string tf_line;
     int counter = 0;
-    while (getline(ifs, tf_line)){
-        auto access = parse_tracefile_line(tf_line);
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+    uint64_t timer = 0;
+    uint64_t unaligned = 0;
 
-        counter++;
-        if (counter == 10) break;
+    while (getline(ifs, tf_line)){
+        auto [addr, op, size] = parse_tracefile_line(tf_line);
+
+        uint64_t start_addr = addr;
+        uint64_t end_addr = addr + size - 1;
+
+        timer++;
+        
+        for (auto& cache : config.caches) {
+            // Calculate which line boundaries we cross
+            uint64_t start_line = start_addr / cache.line_size;
+            uint64_t end_line = end_addr / cache.line_size;
+
+            for (uint64_t l = start_line; l <= end_line; l++) {
+                uint64_t current_addr = l * cache.line_size;
+                uint64_t idx = cache.get_index(current_addr);
+                uint64_t tag = cache.get_tag(current_addr);
+                auto set = cache.get_set(idx);
+
+                bool hit = false;
+                for (size_t i = 0; i < set.size(); i++) {
+                    if (set[i].valid && set[i].tag == tag) {
+                        hits++;
+                        set[i].last_access = timer;
+                        hit = true;
+                        break;
+                    }
+                }
+
+                if (!hit) {
+                    misses++;
+                    // Basic insertion (Update with LRU logic later)
+                    set[0].valid = true;
+                    set[0].tag = tag;
+                    set[0].last_access = timer;
+                }
+            }
+        }
     }
 
-
+    std::cout << "\nhits: " << hits << "\n";
+    std::cout << "\nmisses: " << misses << "\n";
+    std::cout << "\nunaligned: " << unaligned << "\n";
+    std::cout << "\nmain memory accesses:" << misses << "\n";
 
 
     return 0;

@@ -27,7 +27,8 @@ private:
 struct CacheLine {
     uint64_t tag;
     bool valid = false;
-    uint64_t last_access = 0; 
+    uint64_t last_access = 0;  // For LRU: timestamp of last access
+    uint64_t access_count = 0; // For LFU: number of accesses
 };
 
 /* Cache metadata */
@@ -37,7 +38,9 @@ struct Cache {
   size_t line_size;
   std::string kind;
   std::optional<std::string> replacement_policy;
+    std::vector<uint32_t> rr_counters; // One counter per set for round robin
 
+  /* metadata */
   unsigned int num_sets;
   unsigned int lines_per_set;
 
@@ -46,6 +49,11 @@ struct Cache {
   unsigned int index_size;
   unsigned int offset_size;
 
+  /* per-cache stats */
+  uint64_t hits = 0;
+  uint64_t misses = 0;
+
+  /* storage simulation */
   std::vector<CacheLine> storage;
 
   Span<CacheLine> get_set(unsigned int index) {

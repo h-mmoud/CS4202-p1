@@ -4,6 +4,11 @@
 #include "cache-sim.hpp"
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cctype>
 
 void calc_num_sets(Cache *c);
 void calc_lines_per_set(Cache *c);
@@ -76,6 +81,7 @@ int parse_config_json(CacheConfig *config, std::string filename) {
             calc_lines_per_set(&cache);
             calc_bit_counts(&cache);
             cache.storage.resize(cache.num_sets * cache.lines_per_set);
+            cache.rr_counters.resize(cache.num_sets, 0); // Initialize RR counters
             config->caches.push_back(cache);
 
         }
@@ -91,23 +97,78 @@ int parse_config_json(CacheConfig *config, std::string filename) {
         << "\ntag bits: " << c.tag_size;
     }
 
+
     return 0;
 }
 
-std::tuple<uint64_t, char, int> parse_tracefile_line(std::string tracefile_line) {
-    uint64_t pc, addr;
-    char op; // read/write
-    int size; 
-    sscanf(tracefile_line.c_str(), "%lx %lx %c %d", &pc, &addr, &op, &size);
+bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
+  uint64_t idx = cache->get_index(addr);
+  uint64_t tag = cache->get_tag(addr);
+  auto set = cache->get_set(idx);
 
-    return {addr, op, size};
+  /* check for hit */
+  for (size_t i = 0; i < set.size(); i++) {
+    if (set[i].valid && set[i].tag == tag) {
+      cache->hits++;
+      set[i].last_access = timer;
+      set[i].access_count++;
+      return true;
+    }
+  }
 
+  cache->misses++;
+
+  /* check for an empty (invalid) line first */
+  for (size_t i = 0; i < set.size(); i++) {
+    if (!set[i].valid) {
+      set[i].valid = true;
+      set[i].tag = tag;
+      set[i].last_access = timer;
+      set[i].access_count = 1;
+      return false;
+    }
+  }
+
+  /* eviction needed */
+  size_t victim_idx = 0;
+
+  if (cache->kind == "direct") {
+    /* direct-mapped: only one line per set */
+    victim_idx = 0;
+  } else if (cache->replacement_policy == "lru") {
+    /* Least Recently Used: find line with smallest last_access */
+    uint64_t min_time = set[0].last_access;
+    for (size_t i = 1; i < set.size(); i++) {
+      if (set[i].last_access < min_time) {
+        min_time = set[i].last_access;
+        victim_idx = i;
+      }
+    }
+  } else if (cache->replacement_policy == "lfu") {
+    /* Least Frequently Used: find line with smallest access_count */
+    uint64_t min_count = set[0].access_count;
+    victim_idx = 0;
+    for (size_t i = 1; i < set.size(); i++) {
+      if (set[i].access_count < min_count) {
+        min_count = set[i].access_count;
+        victim_idx = i;
+      }
+    }
+  } else {
+    /* Default: Round Robin */
+    victim_idx = cache->rr_counters[idx];
+    cache->rr_counters[idx] = (victim_idx + 1) % cache->lines_per_set;
+  }
+
+  set[victim_idx].valid = true;
+  set[victim_idx].tag = tag;
+  set[victim_idx].last_access = timer;
+  set[victim_idx].access_count = 1;
+
+  return false;
 }
 
-// std::tuple<uint
-// todo: vectors to simulate cache
-// spans for sets
-//
+
 
 int main(int argc, char* argv[]) {
     CacheConfig config;
@@ -115,61 +176,113 @@ int main(int argc, char* argv[]) {
     std::string tracefilename = argv[2];
     parse_config_json(&config, filename);
 
-    std::ifstream ifs;
-    ifs.open(tracefilename, std::ifstream::in);
+    int fd = open(tracefilename.c_str(), O_RDONLY);
+    if (fd == -1) {
+        std::cerr << "Failed to open trace file\n";
+        return 1;
+    }
 
-    std::string tf_line;
+    struct stat sb;
+    if (fstat(fd, &sb) == -1) {
+        std::cerr << "Failed to get file size\n";
+        close(fd);
+        return 1;
+    }
+
+    const char* file_data = static_cast<const char*>(mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0));
+    if (file_data == MAP_FAILED) {
+        std::cerr << "mmap failed\n";
+        close(fd);
+        return 1;
+    }
+
+
+    // std::ifstream ifs;
+    // ifs.open(tracefilename, std::ifstream::in);
+
+    // std::string tf_line;
     int counter = 0;
-    uint64_t hits = 0;
-    uint64_t misses = 0;
     uint64_t timer = 0;
-    uint64_t unaligned = 0;
+    uint64_t main_memory_accesses = 0;
 
-    while (getline(ifs, tf_line)){
-        auto [addr, op, size] = parse_tracefile_line(tf_line);
+    const char* ptr = file_data;
+    const char* end = file_data + sb.st_size;
+
+    while (ptr < end) {
+        uint64_t pc = 0, addr = 0;
+        char op = 0;
+        int size = 0;
+
+        // Fast parse PC (hex)
+        while (ptr < end && std::isspace(*ptr)) ptr++;
+        while (ptr < end && !std::isspace(*ptr)) {
+            pc = (pc << 4) | (*ptr <= '9' ? *ptr - '0' : (*ptr & ~0x20) - 'A' + 10);
+            ptr++;
+        }
+
+        // Fast parse Address (hex)
+        while (ptr < end && std::isspace(*ptr)) ptr++;
+        while (ptr < end && !std::isspace(*ptr)) {
+            addr = (addr << 4) | (*ptr <= '9' ? *ptr - '0' : (*ptr & ~0x20) - 'A' + 10);
+            ptr++;
+        }
+
+        // Fast parse Op (char)
+        while (ptr < end && std::isspace(*ptr)) ptr++;
+        if (ptr < end) {
+            op = *ptr;
+            ptr++;
+        }
+
+        // Fast parse Size (decimal)
+        while (ptr < end && std::isspace(*ptr)) ptr++;
+        while (ptr < end && !std::isspace(*ptr)) {
+            size = size * 10 + (*ptr - '0');
+            ptr++;
+        }
+
+        // Skip to next line
+        while (ptr < end && *ptr != '\n') ptr++;
+        if (ptr < end && *ptr == '\n') ptr++;
+
+        if (size == 0 && op == 0) continue; // Skip empty lines
 
         uint64_t start_addr = addr;
         uint64_t end_addr = addr + size - 1;
-
         timer++;
         
-        for (auto& cache : config.caches) {
-            // Calculate which line boundaries we cross
-            uint64_t start_line = start_addr / cache.line_size;
-            uint64_t end_line = end_addr / cache.line_size;
+        // Calculate which line boundaries we cross
+        uint64_t line_size = config.caches[0].line_size;
+        uint64_t start_line = start_addr / line_size;
+        uint64_t end_line = end_addr / line_size;
 
-            for (uint64_t l = start_line; l <= end_line; l++) {
-                uint64_t current_addr = l * cache.line_size;
-                uint64_t idx = cache.get_index(current_addr);
-                uint64_t tag = cache.get_tag(current_addr);
-                auto set = cache.get_set(idx);
+        for (uint64_t l = start_line; l <= end_line; l++) {
+            uint64_t current_addr = l * line_size;
 
-                bool hit = false;
-                for (size_t i = 0; i < set.size(); i++) {
-                    if (set[i].valid && set[i].tag == tag) {
-                        hits++;
-                        set[i].last_access = timer;
-                        hit = true;
-                        break;
-                    }
-                }
+            bool found = false;
+            for (auto& cache : config.caches) {
+            if (access_cache(&cache, current_addr, timer)){
+                found = true;
+                break;
+            }
+            }
 
-                if (!hit) {
-                    misses++;
-                    // Basic insertion (Update with LRU logic later)
-                    set[0].valid = true;
-                    set[0].tag = tag;
-                    set[0].last_access = timer;
-                }
+            if (!found) {
+                main_memory_accesses++;
             }
         }
     }
 
-    std::cout << "\nhits: " << hits << "\n";
-    std::cout << "\nmisses: " << misses << "\n";
-    std::cout << "\nunaligned: " << unaligned << "\n";
-    std::cout << "\nmain memory accesses:" << misses << "\n";
+    munmap((void*)file_data, sb.st_size);
+    close(fd);
 
+    for (const auto& cache : config.caches) {
+        uint64_t total = cache.hits + cache.misses;
+        std::cout << "\n[" << cache.name << "]"
+                  << "\n  hits:   " << cache.hits
+                  << "\n  misses: " << cache.misses;
+    }
+    std::cout << "\nmain memory accesses: " << main_memory_accesses << "\n";
 
     return 0;
 }

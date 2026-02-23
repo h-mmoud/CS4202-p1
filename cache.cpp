@@ -55,17 +55,31 @@ void calc_bit_counts(Cache* c) {
 }
 
 
+// Helper to move a cache line to the Most Recently Used (head) position
+void move_to_mru(Cache* cache, uint64_t set_idx, int32_t line_idx) {
+    auto set = cache->get_set(set_idx);
+    int32_t head = cache->lru_head[set_idx];
+    
+    if (head == line_idx) return; // Already at MRU
 
-size_t find_victim_lru(Span<CacheLine>& set) {
-    size_t victim = 0;
-    uint64_t min_time = set[0].last_access;
-    for (size_t i = 1; i < set.size(); i++) {
-        if (set[i].last_access < min_time) {
-            min_time = set[i].last_access;
-            victim = i;
-        }
+    // Unlink from current position
+    int32_t prev = set[line_idx].prev;
+    int32_t next = set[line_idx].next;
+
+    if (prev != -1) set[prev].next = next;
+    if (next != -1) set[next].prev = prev;
+
+    // If it was the tail, update the tail
+    if (cache->lru_tail[set_idx] == line_idx) {
+        cache->lru_tail[set_idx] = prev;
     }
-    return victim;
+
+    // Move to head
+    set[line_idx].prev = -1;
+    set[line_idx].next = head;
+    if (head != -1) set[head].prev = line_idx;
+    
+    cache->lru_head[set_idx] = line_idx;
 }
 
 size_t find_victim_lfu(Span<CacheLine>& set) {
@@ -88,53 +102,89 @@ void init_cache(Cache* cache) {
     calc_bit_counts(cache);
     cache->storage.resize(cache->num_sets * cache->lines_per_set);
     cache->rr_counters.resize(cache->num_sets, 0);
+    
+    // Initialize LRU tracking
+    cache->lru_head.resize(cache->num_sets, -1);
+    cache->lru_tail.resize(cache->num_sets, -1);
+    cache->tag_maps.resize(cache->num_sets);
+
+    for (unsigned int s = 0; s < cache->num_sets; s++) {
+        auto set = cache->get_set(s);
+        if (cache->lines_per_set > 0) {
+            cache->lru_head[s] = 0;
+            cache->lru_tail[s] = cache->lines_per_set - 1;
+            // Pre-link all lines in the set
+            for (unsigned int i = 0; i < cache->lines_per_set; i++) {
+                set[i].prev = i - 1;
+                set[i].next = (i == cache->lines_per_set - 1) ? -1 : i + 1;
+            }
+        }
+    }
 }
 
 bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
     uint64_t idx = cache->get_index(addr);
     uint64_t tag = cache->get_tag(addr);
     auto set = cache->get_set(idx);
+    auto& tag_map = cache->tag_maps[idx];
 
-    // Check for hit
-    for (size_t i = 0; i < set.size(); i++) {
-        if (set[i].valid && set[i].tag == tag) {
-            cache->hits++;
-            set[i].last_access = timer;
-            set[i].access_count++;
-            return true;
+    // Hit detection using Hash Map
+    auto it = tag_map.find(tag);
+    if (it != tag_map.end()) {
+        cache->hits++;
+        int32_t line_idx = it->second;
+        set[line_idx].last_access = timer;
+        set[line_idx].access_count++;
+        if (cache->replacement_policy == ReplacementPolicy::lru) {
+            move_to_mru(cache, idx, line_idx);
         }
+        return true;
     }
+
+
 
     cache->misses++;
 
     // Look for empty line
+    int32_t victim = -1;
     for (size_t i = 0; i < set.size(); i++) {
         if (!set[i].valid) {
-            set[i].valid = true;
-            set[i].tag = tag;
-            set[i].last_access = timer;
-            set[i].access_count = 1;
-            return false;
+            victim = i;
+            break;
         }
     }
 
-    // Select victim for eviction
-    size_t victim = 0;
-    if (cache->kind == CacheKind::direct) {
-        victim = 0;
-    } else if (cache->replacement_policy == ReplacementPolicy::lru) {
-        victim = find_victim_lru(set);
-    } else if (cache->replacement_policy == ReplacementPolicy::lfu) {
-        victim = find_victim_lfu(set);
-    } else {
-        // Round-robin (default)
-        victim = cache->rr_counters[idx];
-        cache->rr_counters[idx] = (victim + 1) % cache->lines_per_set;
+    // If no empty line, select victim for eviction
+    if (victim == -1) {
+        if (cache->kind == CacheKind::direct) {
+            victim = 0;
+        } else if (cache->replacement_policy == ReplacementPolicy::lru) {
+            victim = cache->lru_tail[idx]; // O(1) LRU victim finding
+        } else if (cache->replacement_policy == ReplacementPolicy::lfu) {
+            victim = find_victim_lfu(set);
+        } else {
+            // Round-robin (default)
+            victim = cache->rr_counters[idx];
+            cache->rr_counters[idx] = (victim + 1) % cache->lines_per_set;
+        }
+        
+        // Remove the evicted tag from the hash map
+        tag_map.erase(set[victim].tag);
     }
 
+    // Update the victim line with new data
+    set[victim].valid = true;
     set[victim].tag = tag;
     set[victim].last_access = timer;
     set[victim].access_count = 1;
+
+    // Add the new tag to the hash map
+    tag_map[tag] = victim;
+
+    // Move the newly filled line to MRU
+    if (cache->replacement_policy == ReplacementPolicy::lru) {
+        move_to_mru(cache, idx, victim);
+    }
 
     return false;
 }

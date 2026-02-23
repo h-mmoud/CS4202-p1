@@ -2,16 +2,40 @@
 #include "config.hpp"
 #include "trace.hpp"
 #include <iostream>
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/prettywriter.h>
 
 using namespace CacheSim;
 
 void print_stats(const CacheConfig& config, uint64_t main_memory_accesses) {
+    rapidjson::Document doc;
+    doc.SetObject();
+    rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
+
+    rapidjson::Value caches_array(rapidjson::kArrayType);
+
     for (const auto& cache : config.caches) {
-        std::cout << "\n[" << cache.name << "]"
-                  << "\n  hits:   " << cache.hits
-                  << "\n  misses: " << cache.misses;
+        rapidjson::Value cache_obj(rapidjson::kObjectType);
+        
+        cache_obj.AddMember("hits", cache.hits, allocator);
+        cache_obj.AddMember("misses", cache.misses, allocator);
+        
+        rapidjson::Value name_val;
+        name_val.SetString(cache.name.c_str(), cache.name.length(), allocator);
+        cache_obj.AddMember("name", name_val, allocator);
+
+        caches_array.PushBack(cache_obj, allocator);
     }
-    std::cout << "\nmain memory accesses: " << main_memory_accesses << "\n";
+
+    doc.AddMember("caches", caches_array, allocator);
+    doc.AddMember("main_memory_accesses", main_memory_accesses, allocator);
+
+    rapidjson::StringBuffer buffer;
+    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+
+    std::cout << buffer.GetString() << "\n";
 }
 
 int main(int argc, char* argv[]) {

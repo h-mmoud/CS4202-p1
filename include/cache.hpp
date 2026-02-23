@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <optional>
+#include <unordered_map>
 
 namespace CacheSim {
 
@@ -33,6 +34,9 @@ struct CacheLine {
     bool valid = false;
     uint64_t last_access = 0;   // For LRU: timestamp of last access
     uint64_t access_count = 0;  // For LFU: number of accesses
+
+    int32_t prev = -1;
+    int32_t next = -1;
 };
 
 
@@ -60,6 +64,13 @@ struct Cache {
     uint64_t misses = 0;
     std::vector<CacheLine> storage;
     std::vector<uint32_t> rr_counters;  // Round-robin counters per set
+
+    // LRU Doubly linked list
+    std::vector<int32_t> lru_head;
+    std::vector<int32_t> lru_tail;
+
+    // 
+    std::vector<std::unordered_map<uint64_t, int32_t>> tag_maps;
 
     // Methods
     Span<CacheLine> get_set(unsigned int index);

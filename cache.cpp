@@ -16,17 +16,23 @@ uint64_t Cache::get_index(uint64_t addr) const {
 
 namespace {
 
-void calc_num_sets(Cache* c) {
-    if (c->kind == "full") {
-        c->num_sets = 1;
-    } else if (c->kind == "direct") {
-        c->num_sets = static_cast<uint32_t>(c->size / c->line_size);
-    } else if (c->kind == "2way") {
-        c->num_sets = static_cast<uint32_t>(c->size / (2 * c->line_size));
-    } else if (c->kind == "4way") {
-        c->num_sets = static_cast<uint32_t>(c->size / (4 * c->line_size));
-    } else if (c->kind == "8way") {
-        c->num_sets = static_cast<uint32_t>(c->size / (8 * c->line_size));
+void calc_num_sets(Cache *c) {
+    switch (c->kind) {
+        case CacheKind::full:
+            c->num_sets = 1;
+            break;
+        case CacheKind::direct:
+            c->num_sets = (uint32_t)(c->size / c->line_size);
+            break;
+        case CacheKind::_2way:
+            c->num_sets = (uint32_t)(c->size / (2 * c->line_size));
+            break;
+        case CacheKind::_4way:
+            c->num_sets = (uint32_t)(c->size / (4 * c->line_size));
+            break;
+        case CacheKind::_8way:
+            c->num_sets = (uint32_t)(c->size / (8 * c->line_size));
+            break;
     }
 }
 
@@ -47,6 +53,8 @@ void calc_bit_counts(Cache* c) {
     c->offset_size = offset_bits;
     c->tag_size = 64 - (index_bits + offset_bits);
 }
+
+
 
 size_t find_victim_lru(Span<CacheLine>& set) {
     size_t victim = 0;
@@ -112,11 +120,11 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
 
     // Select victim for eviction
     size_t victim = 0;
-    if (cache->kind == "direct") {
+    if (cache->kind == CacheKind::direct) {
         victim = 0;
-    } else if (cache->replacement_policy == "lru") {
+    } else if (cache->replacement_policy == ReplacementPolicy::lru) {
         victim = find_victim_lru(set);
-    } else if (cache->replacement_policy == "lfu") {
+    } else if (cache->replacement_policy == ReplacementPolicy::lfu) {
         victim = find_victim_lfu(set);
     } else {
         // Round-robin (default)

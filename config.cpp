@@ -7,6 +7,21 @@
 
 namespace CacheSim {
 
+CacheKind parse_cache_kind(const std::string& s) {
+    if (s == "full") return CacheKind::full;
+    if (s == "direct") return CacheKind::direct;
+    if (s == "2way") return CacheKind::_2way;
+    if (s == "4way") return CacheKind::_4way;
+    if (s == "8way") return CacheKind::_8way;
+    return CacheKind::direct; // default
+}
+
+ReplacementPolicy parse_replacement_policy(const std::string& s) {
+    if (s == "lru") return ReplacementPolicy::lru;
+    if (s == "lfu") return ReplacementPolicy::lfu;
+    return ReplacementPolicy::rr; // default
+}
+
 int parse_config(CacheConfig* config, const std::string& filename) {
     std::ifstream ifs(filename);
     if (!ifs.is_open()) {
@@ -40,10 +55,12 @@ int parse_config(CacheConfig* config, const std::string& filename) {
             cache.size = c["size"].GetUint64();
         if (c.HasMember("line_size") && c["line_size"].IsUint64())
             cache.line_size = c["line_size"].GetUint64();
-        if (c.HasMember("kind") && c["kind"].IsString())
-            cache.kind = c["kind"].GetString();
-        if (c.HasMember("replacement_policy") && c["replacement_policy"].IsString())
-            cache.replacement_policy = c["replacement_policy"].GetString();
+        if (c.HasMember("kind") && c["kind"].IsString()) {
+            cache.kind = parse_cache_kind(c["kind"].GetString());
+        }
+        if (c.HasMember("replacement_policy") && c["replacement_policy"].IsString()) {
+            cache.replacement_policy = parse_replacement_policy(c["replacement_policy"].GetString());
+        }
 
         init_cache(&cache);
         config->caches.push_back(cache);

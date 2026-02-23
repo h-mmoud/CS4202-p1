@@ -35,14 +35,18 @@ struct CacheLine {
     uint64_t access_count = 0;  // For LFU: number of accesses
 };
 
+
+enum class CacheKind { direct, full, _2way, _4way, _8way };
+enum class ReplacementPolicy { rr, lru, lfu };
+
 // Cache configuration and state
 struct Cache {
     // Configuration
     std::string name;
     size_t size;
     size_t line_size;
-    std::string kind;
-    std::optional<std::string> replacement_policy;
+    CacheKind kind; 
+    ReplacementPolicy replacement_policy;
 
     // Derived metadata
     unsigned int num_sets;

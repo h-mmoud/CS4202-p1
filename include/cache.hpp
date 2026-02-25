@@ -84,18 +84,13 @@ struct Cache {
     // heap_pos maps a cache line index to its current position in the heap
     std::vector<int32_t> heap_pos;
 
-    // 
+    // Hash map, used for fully associative tag matching
     std::vector<std::unordered_map<uint64_t, int32_t>> tag_maps;
 
     // Methods
     Span<CacheLine> get_set(unsigned int index);
     uint64_t get_tag(uint64_t addr) const;
     uint64_t get_index(uint64_t addr) const;
-
-
-    void swap_heap(Cache* cache, uint32_t set_idx, int32_t h1, int32_t h2);
-
-    void sift_down_lfu(Cache* cache, uint32_t set_idx, int32_t heap_idx);
 };
 
 // Initialise cache derived values

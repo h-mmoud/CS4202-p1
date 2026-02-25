@@ -7,7 +7,7 @@
 
 namespace CacheSim {
 
-/* Maps string values to enum types for cache configuration */
+/* Map string values to enum types for cache configuration */
 CacheKind parse_cache_kind(const std::string& s) {
     if (s == "full") return CacheKind::full;
     if (s == "direct") return CacheKind::direct;

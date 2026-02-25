@@ -48,7 +48,7 @@ namespace CacheSim {
             return false;
         }
         
-        /* Tells kernel that file will be read sequentially */
+        // Tells kernel that file will be read sequentially
         madvise(const_cast<char*>(file_data_), file_size_, MADV_SEQUENTIAL);
         ptr_ = file_data_;
         end_ = file_data_ + file_size_;

@@ -296,7 +296,6 @@ void init_cache(Cache* cache) {
 
 /**
  * Checks if an address is a hit or miss for a specific cache.
- * Checks hit using linear scan for most caches and hash map for fully associative 
  */
 bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
     uint64_t idx = cache->get_index(addr);

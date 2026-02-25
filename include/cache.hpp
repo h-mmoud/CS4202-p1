@@ -93,6 +93,9 @@ struct Cache {
     uint64_t get_index(uint64_t addr) const;
 
 
+    void swap_heap(Cache* cache, uint32_t set_idx, int32_t h1, int32_t h2);
+
+    void sift_down_lfu(Cache* cache, uint32_t set_idx, int32_t heap_idx);
 };
 
 // Initialise cache derived values
@@ -101,9 +104,6 @@ void init_cache(Cache* cache);
 // Access cache, returns true on hit
 bool access_cache(Cache* cache, uint64_t addr, uint64_t timer);
 
-void swap_heap(Cache* cache, uint32_t set_idx, int32_t h1, int32_t h2);
-
-void sift_down_lfu(Cache* cache, uint32_t set_idx, int32_t heap_idx);
 }  // namespace CacheSim
 
 #endif

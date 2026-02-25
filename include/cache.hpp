@@ -78,6 +78,12 @@ struct Cache {
     std::vector<int32_t> lru_head;
     std::vector<int32_t> lru_tail;
 
+    // Min-Heap LFU tracking
+    // lfu_heaps stores the cache line indices (0 to lines_per_set - 1)
+    std::vector<int32_t> lfu_heaps; 
+    // heap_pos maps a cache line index to its current position in the heap
+    std::vector<int32_t> heap_pos;
+
     // 
     std::vector<std::unordered_map<uint64_t, int32_t>> tag_maps;
 
@@ -95,6 +101,9 @@ void init_cache(Cache* cache);
 // Access cache, returns true on hit
 bool access_cache(Cache* cache, uint64_t addr, uint64_t timer);
 
+void swap_heap(Cache* cache, uint32_t set_idx, int32_t h1, int32_t h2);
+
+void sift_down_lfu(Cache* cache, uint32_t set_idx, int32_t heap_idx);
 }  // namespace CacheSim
 
 #endif

@@ -83,18 +83,6 @@ void move_to_mru(Cache* cache, uint64_t set_idx, int32_t line_idx) {
     cache->lru_head[set_idx] = line_idx;
 }
 
-size_t find_victim_lfu(Span<CacheLine>& set) {
-    size_t victim = 0;
-    uint64_t min_count = set[0].access_count;
-    for (size_t i = 1; i < set.size(); i++) {
-        if (set[i].access_count < min_count) {
-            min_count = set[i].access_count;
-            victim = i;
-        }
-    }
-    return victim;
-}
-
 }  // anonymous namespace
 
 void init_cache(Cache* cache) {
@@ -121,6 +109,21 @@ void init_cache(Cache* cache) {
             }
         }
     }
+
+    if (cache->replacement_policy == ReplacementPolicy::lfu && cache->lines_per_set > 0) {
+        uint32_t total_lines = cache->num_sets * cache->lines_per_set;
+        cache->lfu_heaps.resize(total_lines);
+        cache->heap_pos.resize(total_lines);
+        
+        for (uint32_t s = 0; s < cache->num_sets; s++) {
+            for (uint32_t i = 0; i < cache->lines_per_set; i++) {
+                uint32_t idx = s * cache->lines_per_set + i;
+                // Initialize heap such that line `i` is at heap position `i`
+                cache->lfu_heaps[idx] = i;
+                cache->heap_pos[idx] = i;
+            }
+        }
+    }
 }
 
 /**
@@ -134,12 +137,8 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
 
     int32_t hit_idx = -1;
 
-    /**
-     * Only use the hash map for fully associative caches 
-     * (memory overhead is too high for it to be efficient with low associativity caches)
-     */
     if (cache->kind != CacheKind::full) {
-        for (uint32_t i = 0; i < lines; ++i) { // Linear scan for other cache kinds
+        for (uint32_t i = 0; i < lines; ++i) { 
             if (set[i].valid && set[i].tag == tag) {
                 hit_idx = i;
                 break;
@@ -153,79 +152,121 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
         }
     }
 
-    /* Handle hit */
+    // Handle hit
     if (hit_idx != -1) {
         cache->hits++;
         set[hit_idx].last_access = timer;
         set[hit_idx].access_count++;
+        
         if (cache->replacement_policy == ReplacementPolicy::lru) {
-            move_to_mru(cache, idx, hit_idx); // Update doubly linked list
+            move_to_mru(cache, idx, hit_idx); 
+        } else if (cache->replacement_policy == ReplacementPolicy::lfu) {
+            // Because the frequency increased, it gets "heavier" and must sift down
+            uint32_t current_heap_pos = cache->heap_pos[idx * lines + hit_idx];
+            sift_down_lfu(cache, idx, current_heap_pos);
         }
         return true;
     }
 
-    /* Handle miss */
+    // Handle miss
     cache->misses++;
     int32_t victim = -1;
 
-    /* Single-Pass Victim Selection */
     if (cache->replacement_policy == ReplacementPolicy::lfu) {
-        uint64_t min_count = UINT64_MAX;
-        for (uint32_t i = 0; i < lines; ++i) {
-            if (!set[i].valid) {
-                victim = i; // Empty spot found, stop searching instantly
-                break;
-            }
-            if (set[i].access_count < min_count) {
-                min_count = set[i].access_count;
-                victim = i;
-            }
-        }
+        // O(1) victim selection: the victim is always at the root of the heap
+        victim = cache->lfu_heaps[idx * lines + 0];
     } else {
-        // LRU, RR, or Direct policies
+        // Original LRU/RR/Direct victim selection logic
         for (uint32_t i = 0; i < lines; ++i) {
-            if (!set[i].valid) {
-                victim = i;
-                break;
-            }
+            if (!set[i].valid) { victim = i; break; }
         }
-        
-        // If the set is full, use O(1) eviction logic
         if (victim == -1) {
-            if (cache->kind == CacheKind::direct) {
-                victim = 0;
-            } else if (cache->replacement_policy == ReplacementPolicy::lru) {
-                victim = cache->lru_tail[idx];
-            } else {
+            if (cache->kind == CacheKind::direct) victim = 0;
+            else if (cache->replacement_policy == ReplacementPolicy::lru) victim = cache->lru_tail[idx];
+            else {
                 victim = cache->rr_counters[idx];
                 cache->rr_counters[idx] = (victim + 1) % lines;
             }
         }
     }
 
-    /** 
-     * Update Hash Map only if it's a Fully Associative cache 
-     */
     if (cache->kind == CacheKind::full) {
         auto& tag_map = cache->tag_maps[idx];
-        if (set[victim].valid) {
-            tag_map.erase(set[victim].tag);
-        }
+        if (set[victim].valid) tag_map.erase(set[victim].tag);
         tag_map[tag] = victim;
     }
 
-    // Overwrite the victim line
+    // Overwrite victim
     set[victim].valid = true;
     set[victim].tag = tag;
     set[victim].last_access = timer;
     set[victim].access_count = 1;
 
-    /* Update doubly linked list */
     if (cache->replacement_policy == ReplacementPolicy::lru) {
         move_to_mru(cache, idx, victim);
+    } else if (cache->replacement_policy == ReplacementPolicy::lfu) {
+        // The root count changed from 0 (if empty) or >1 (if evicted) to exactly 1.
+        // It needs to sift down to re-balance against other lines with count == 1.
+        sift_down_lfu(cache, idx, 0); 
     }
 
     return false;
+}
+
+void swap_heap(Cache* cache, uint32_t set_idx, int32_t h1, int32_t h2) {
+    uint32_t offset = set_idx * cache->lines_per_set;
+    int32_t line1 = cache->lfu_heaps[offset + h1];
+    int32_t line2 = cache->lfu_heaps[offset + h2];
+    
+    // Swap the elements in the heap array
+    cache->lfu_heaps[offset + h1] = line2;
+    cache->lfu_heaps[offset + h2] = line1;
+    
+    // Update the reverse mapping array
+    cache->heap_pos[offset + line1] = h2;
+    cache->heap_pos[offset + line2] = h1;
+}
+
+void sift_down_lfu(Cache* cache, uint32_t set_idx, int32_t heap_idx) {
+    auto set = cache->get_set(set_idx);
+    uint32_t offset = set_idx * cache->lines_per_set;
+    int32_t size = cache->lines_per_set;
+
+    while (true) {
+        int32_t left = 2 * heap_idx + 1;
+        int32_t right = 2 * heap_idx + 2;
+        int32_t smallest = heap_idx;
+
+        // Check left child
+        if (left < size) {
+            int32_t line_left = cache->lfu_heaps[offset + left];
+            int32_t line_smallest = cache->lfu_heaps[offset + smallest];
+            
+            // Tie-breaking: If counts are equal, prefer the smaller physical index
+            if (set[line_left].access_count < set[line_smallest].access_count ||
+               (set[line_left].access_count == set[line_smallest].access_count && line_left < line_smallest)) {
+                smallest = left;
+            }
+        }
+
+        // Check right child
+        if (right < size) {
+            int32_t line_right = cache->lfu_heaps[offset + right];
+            int32_t line_smallest = cache->lfu_heaps[offset + smallest];
+            
+            if (set[line_right].access_count < set[line_smallest].access_count ||
+               (set[line_right].access_count == set[line_smallest].access_count && line_right < line_smallest)) {
+                smallest = right;
+            }
+        }
+
+        if (smallest != heap_idx) {
+            swap_heap(cache, set_idx, heap_idx, smallest);
+            heap_idx = smallest; // Continue sifting down
+        } else {
+            break;
+        }
+    }
 }
 
 }  // namespace CacheSim

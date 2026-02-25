@@ -46,6 +46,7 @@ void calc_bit_counts(Cache* c) {
     unsigned int index_bits = 0;
     unsigned int offset_bits = 0;
 
+    // log_2 bit shifting operation
     while (num_sets >>= 1) index_bits++;
     while (line_size >>= 1) offset_bits++;
 
@@ -103,7 +104,7 @@ void init_cache(Cache* cache) {
     cache->storage.resize(cache->num_sets * cache->lines_per_set);
     cache->rr_counters.resize(cache->num_sets, 0);
     
-    // Initialize LRU tracking
+    // LRU tracking
     cache->lru_head.resize(cache->num_sets, -1);
     cache->lru_tail.resize(cache->num_sets, -1);
     cache->tag_maps.resize(cache->num_sets);
@@ -122,6 +123,9 @@ void init_cache(Cache* cache) {
     }
 }
 
+/**
+ * Checks if an address is a hit or miss for a specific cache.
+ */
 bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
     uint64_t idx = cache->get_index(addr);
     uint64_t tag = cache->get_tag(addr);
@@ -130,9 +134,12 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
 
     int32_t hit_idx = -1;
 
-    // Only use the hash map for fully associative caches
+    /**
+     * Only use the hash map for fully associative caches 
+     * (memory overhead is too high for it to be efficient with low associativity caches)
+     */
     if (cache->kind != CacheKind::full) {
-        for (uint32_t i = 0; i < lines; ++i) {
+        for (uint32_t i = 0; i < lines; ++i) { // Linear scan for other cache kinds
             if (set[i].valid && set[i].tag == tag) {
                 hit_idx = i;
                 break;
@@ -146,22 +153,22 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
         }
     }
 
-    // --- HANDLE HIT ---
+    /* Handle hit */
     if (hit_idx != -1) {
         cache->hits++;
         set[hit_idx].last_access = timer;
         set[hit_idx].access_count++;
         if (cache->replacement_policy == ReplacementPolicy::lru) {
-            move_to_mru(cache, idx, hit_idx);
+            move_to_mru(cache, idx, hit_idx); // Update doubly linked list
         }
         return true;
     }
 
-    // --- HANDLE MISS ---
+    /* Handle miss */
     cache->misses++;
     int32_t victim = -1;
 
-    // OPTIMIZATION 2: Single-Pass Victim Selection
+    /* Single-Pass Victim Selection */
     if (cache->replacement_policy == ReplacementPolicy::lfu) {
         uint64_t min_count = UINT64_MAX;
         for (uint32_t i = 0; i < lines; ++i) {
@@ -196,7 +203,9 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
         }
     }
 
-    // Update Hash Map ONLY if it's a Fully Associative cache
+    /** 
+     * Update Hash Map only if it's a Fully Associative cache 
+     */
     if (cache->kind == CacheKind::full) {
         auto& tag_map = cache->tag_maps[idx];
         if (set[victim].valid) {
@@ -211,6 +220,7 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
     set[victim].last_access = timer;
     set[victim].access_count = 1;
 
+    /* Update doubly linked list */
     if (cache->replacement_policy == ReplacementPolicy::lru) {
         move_to_mru(cache, idx, victim);
     }

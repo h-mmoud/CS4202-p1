@@ -10,7 +10,11 @@
 
 namespace CacheSim {
 
-// Custom span class for accessing cache sets
+/**
+ * Custom span class for accessing cache sets
+ * Efficiently returns a view of a set using pointer arithmetic
+ * Reduced memroy overhead compared to vectors/arrays
+ */
 template <typename T>
 class Span {
 public:
@@ -65,7 +69,12 @@ struct Cache {
     std::vector<CacheLine> storage;
     std::vector<uint32_t> rr_counters;  // Round-robin counters per set
 
-    // LRU Doubly linked list
+    /** 
+     * LRU Doubly linked list 
+     * Allows for O(1) updates for lru tracking
+     * Most recently used lines at the head, least recently used at the tail
+     * On every access, accessed line is moved to the head
+     */
     std::vector<int32_t> lru_head;
     std::vector<int32_t> lru_tail;
 
@@ -76,6 +85,8 @@ struct Cache {
     Span<CacheLine> get_set(unsigned int index);
     uint64_t get_tag(uint64_t addr) const;
     uint64_t get_index(uint64_t addr) const;
+
+
 };
 
 // Initialise cache derived values

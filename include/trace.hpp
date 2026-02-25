@@ -31,11 +31,7 @@ private:
     size_t file_size_ = 0;
     int fd_ = -1;
 
-    uint64_t parse_hex();
-    int parse_decimal();
-    void skip_whitespace();
-};
-
+    };
 }  // namespace CacheSim
 
 #endif

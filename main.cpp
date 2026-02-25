@@ -8,6 +8,7 @@
 
 using namespace CacheSim;
 
+/* Pretty printing */
 void print_stats(const CacheConfig& config, uint64_t main_memory_accesses) {
     rapidjson::Document doc;
     doc.SetObject();

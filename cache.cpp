@@ -126,62 +126,91 @@ bool access_cache(Cache* cache, uint64_t addr, uint64_t timer) {
     uint64_t idx = cache->get_index(addr);
     uint64_t tag = cache->get_tag(addr);
     auto set = cache->get_set(idx);
-    auto& tag_map = cache->tag_maps[idx];
+    uint32_t lines = cache->lines_per_set;
 
-    // Hit detection using Hash Map
-    auto it = tag_map.find(tag);
-    if (it != tag_map.end()) {
+    int32_t hit_idx = -1;
+
+    // Only use the hash map for fully associative caches
+    if (cache->kind != CacheKind::full) {
+        for (uint32_t i = 0; i < lines; ++i) {
+            if (set[i].valid && set[i].tag == tag) {
+                hit_idx = i;
+                break;
+            }
+        }
+    } else {
+        auto& tag_map = cache->tag_maps[idx];
+        auto it = tag_map.find(tag);
+        if (it != tag_map.end()) {
+            hit_idx = it->second;
+        }
+    }
+
+    // --- HANDLE HIT ---
+    if (hit_idx != -1) {
         cache->hits++;
-        int32_t line_idx = it->second;
-        set[line_idx].last_access = timer;
-        set[line_idx].access_count++;
+        set[hit_idx].last_access = timer;
+        set[hit_idx].access_count++;
         if (cache->replacement_policy == ReplacementPolicy::lru) {
-            move_to_mru(cache, idx, line_idx);
+            move_to_mru(cache, idx, hit_idx);
         }
         return true;
     }
 
-
-
+    // --- HANDLE MISS ---
     cache->misses++;
-
-    // Look for empty line
     int32_t victim = -1;
-    for (size_t i = 0; i < set.size(); i++) {
-        if (!set[i].valid) {
-            victim = i;
-            break;
-        }
-    }
 
-    // If no empty line, select victim for eviction
-    if (victim == -1) {
-        if (cache->kind == CacheKind::direct) {
-            victim = 0;
-        } else if (cache->replacement_policy == ReplacementPolicy::lru) {
-            victim = cache->lru_tail[idx]; // O(1) LRU victim finding
-        } else if (cache->replacement_policy == ReplacementPolicy::lfu) {
-            victim = find_victim_lfu(set);
-        } else {
-            // Round-robin (default)
-            victim = cache->rr_counters[idx];
-            cache->rr_counters[idx] = (victim + 1) % cache->lines_per_set;
+    // OPTIMIZATION 2: Single-Pass Victim Selection
+    if (cache->replacement_policy == ReplacementPolicy::lfu) {
+        uint64_t min_count = UINT64_MAX;
+        for (uint32_t i = 0; i < lines; ++i) {
+            if (!set[i].valid) {
+                victim = i; // Empty spot found, stop searching instantly
+                break;
+            }
+            if (set[i].access_count < min_count) {
+                min_count = set[i].access_count;
+                victim = i;
+            }
+        }
+    } else {
+        // LRU, RR, or Direct policies
+        for (uint32_t i = 0; i < lines; ++i) {
+            if (!set[i].valid) {
+                victim = i;
+                break;
+            }
         }
         
-        // Remove the evicted tag from the hash map
-        tag_map.erase(set[victim].tag);
+        // If the set is full, use O(1) eviction logic
+        if (victim == -1) {
+            if (cache->kind == CacheKind::direct) {
+                victim = 0;
+            } else if (cache->replacement_policy == ReplacementPolicy::lru) {
+                victim = cache->lru_tail[idx];
+            } else {
+                victim = cache->rr_counters[idx];
+                cache->rr_counters[idx] = (victim + 1) % lines;
+            }
+        }
     }
 
-    // Update the victim line with new data
+    // Update Hash Map ONLY if it's a Fully Associative cache
+    if (cache->kind == CacheKind::full) {
+        auto& tag_map = cache->tag_maps[idx];
+        if (set[victim].valid) {
+            tag_map.erase(set[victim].tag);
+        }
+        tag_map[tag] = victim;
+    }
+
+    // Overwrite the victim line
     set[victim].valid = true;
     set[victim].tag = tag;
     set[victim].last_access = timer;
     set[victim].access_count = 1;
 
-    // Add the new tag to the hash map
-    tag_map[tag] = victim;
-
-    // Move the newly filled line to MRU
     if (cache->replacement_policy == ReplacementPolicy::lru) {
         move_to_mru(cache, idx, victim);
     }

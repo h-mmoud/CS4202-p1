@@ -7,6 +7,7 @@
 
 namespace CacheSim {
 
+/* Maps string values to enum types for cache configuration */
 CacheKind parse_cache_kind(const std::string& s) {
     if (s == "full") return CacheKind::full;
     if (s == "direct") return CacheKind::direct;
@@ -22,6 +23,10 @@ ReplacementPolicy parse_replacement_policy(const std::string& s) {
     return ReplacementPolicy::rr; // default
 }
 
+/**
+ * Read config file for parsing 
+ * Uses RapidJSON for efficient parsing
+ */
 int parse_config(CacheConfig* config, const std::string& filename) {
     std::ifstream ifs(filename);
     if (!ifs.is_open()) {
@@ -46,6 +51,7 @@ int parse_config(CacheConfig* config, const std::string& filename) {
         return 1;
     }
 
+    /* Iternates through cache configs */
     for (const auto& c : doc["caches"].GetArray()) {
         Cache cache;
         

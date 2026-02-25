@@ -16,6 +16,7 @@ void print_stats(const CacheConfig& config, uint64_t main_memory_accesses) {
 
     rapidjson::Value caches_array(rapidjson::kArrayType);
 
+    // Iterate over each cache and add its stats to the JSON array
     for (const auto& cache : config.caches) {
         rapidjson::Value cache_obj(rapidjson::kObjectType);
         
@@ -39,6 +40,9 @@ void print_stats(const CacheConfig& config, uint64_t main_memory_accesses) {
     std::cout << buffer.GetString() << "\n";
 }
 
+/**
+ * Usage: ./cache-sim <config.json> <trace_file>
+ */
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <config.json> <trace_file>\n";
@@ -46,6 +50,7 @@ int main(int argc, char* argv[]) {
     }
 
     CacheConfig config;
+    // Parse the cache configuration from the JSON file
     if (parse_config(&config, argv[1]) != 0) {
         return 1;
     }
@@ -55,7 +60,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    uint64_t timer = 0;
+    uint64_t timer = 0;                  // Simulated time or access counter
     uint64_t main_memory_accesses = 0;
     uint64_t line_size = config.caches[0].line_size;
     TraceEntry entry;
@@ -63,13 +68,16 @@ int main(int argc, char* argv[]) {
     while (reader.next(entry)) {
         timer++;
 
+        // Calculate the range of cache lines affected by this memory access
         uint64_t start_line = entry.addr / line_size;
         uint64_t end_line = (entry.addr + entry.size - 1) / line_size;
 
+        // For each cache line in the access range
         for (uint64_t line = start_line; line <= end_line; line++) {
             uint64_t addr = line * line_size;
             bool hit = false;
 
+            // Check each cache in order; stop at first hit
             for (auto& cache : config.caches) {
                 if (access_cache(&cache, addr, timer)) {
                     hit = true;
@@ -77,6 +85,7 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // If not found in any cache, count as main memory access
             if (!hit) {
                 main_memory_accesses++;
             }

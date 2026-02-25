@@ -2,7 +2,7 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -std=c++20 -O3 -g -I./include
+CXXFLAGS = -std=c++17 -O3 -g -I./include
 
 # Directories
 BIN_DIR = bin
